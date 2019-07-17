@@ -1,4 +1,5 @@
 from __future__ import unicode_literals
+import hashlib
 import json
 import os
 from datetime import datetime, timedelta
@@ -896,7 +897,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'name': 'seed',
                     'root_path': OneOf(self.test_root_dir, self.initial_dir),
                     'resource_type': 'seed',
-                    'raw_sql': '-- csv --',
+                    'raw_sql': '',
                     'package_name': 'test',
                     'original_file_path': self.dir(os.path.join('seed',
                                                                 'seed.csv')),
@@ -1049,6 +1050,38 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'user_id': None,
             },
             'disabled': [],
+            'files': {
+                'macros/dummy_test.sql': {
+                    'path': self._path_to('macros', 'dummy_test.sql'),
+                    'checksum': self._checksum_file('macros/dummy_test.sql'),
+                    'nodes': ['macro.test.test_nothing'],
+                    'patches': [],
+                },
+                'models/model.sql': {
+                    'path': self._path_to('models', 'model.sql'),
+                    'checksum': self._checksum_file('models/model.sql'),
+                    'nodes': ['model.test.model'],
+                    'patches': [],
+                },
+                'seed/seed.csv': {
+                    'path': self._path_to('seed', 'seed.csv'),
+                    'checksum': {'name': 'none', 'checksum': ''},
+                    'nodes': ['seed.test.seed'],
+                    'patches': [],
+                },
+                'models/readme.md': {
+                    'path': self._path_to('models', 'readme.md'),
+                    'checksum': self._checksum_file('models/readme.md'),
+                    'nodes': [],
+                    'patches': [],
+                },
+                'models/schema.yml': {
+                    'path': self._path_to('models', 'schema.yml'),
+                    'checksum': self._checksum_file('models/schema.yml'),
+                    'nodes': ['test.test.unique_model_id', 'test.test.not_null_model_id', 'test.test.nothing_model_'],
+                    'patches': ['model'],
+                },
+            },
         }
 
     def expected_postgres_references_manifest(self, model_database=None):
@@ -1057,7 +1090,22 @@ class TestDocsGenerate(DBTIntegrationTest):
         config_vars = {'alternate_db': model_database}
         my_schema_name = self.unique_schema()
         docs_path = self.dir('ref_models/docs.md')
-        docs_file = LineIndifferent(_read_file(docs_path).lstrip())
+
+        ephemeral_summary = LineIndifferent(
+            '{% docs ephemeral_summary %}\nA summmary table of the ephemeral copy of the seed data\n{% enddocs %}'
+        )
+        source_info = LineIndifferent('{% docs source_info %}\nMy source\n{% enddocs %}')
+        summary_count = LineIndifferent(
+            '{% docs summary_count %}\nThe number of instances of the first name\n{% enddocs %}'
+        )
+        summary_first_name = LineIndifferent(
+            '{% docs summary_first_name %}\nThe first name being summarized\n{% enddocs %}'
+        )
+        table_info = LineIndifferent('{% docs table_info %}\nMy table\n{% enddocs %}')
+        view_summary = LineIndifferent(
+            '{% docs view_summary %}\nA view of the summary of the ephemeral copy of the seed data\n{% enddocs %}'
+        )
+
         return {
             'nodes': {
                 'model.test.ephemeral_copy': {
@@ -1257,7 +1305,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'package_name': 'test',
                     'patch_path': None,
                     'path': 'seed.csv',
-                    'raw_sql': '-- csv --',
+                    'raw_sql': '',
                     'refs': [],
                     'resource_type': 'seed',
                     'root_path': OneOf(self.test_root_dir, self.initial_dir),
@@ -1315,7 +1363,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'block_contents': (
                         'A summmary table of the ephemeral copy of the seed data'
                     ),
-                    'file_contents': docs_file,
+                    'file_contents': ephemeral_summary,
                     'name': 'ephemeral_summary',
                     'original_file_path': docs_path,
                     'package_name': 'test',
@@ -1325,7 +1373,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'test.source_info': {
                     'block_contents': 'My source',
-                    'file_contents': docs_file,
+                    'file_contents': source_info,
                     'name': 'source_info',
                     'original_file_path': docs_path,
                     'package_name': 'test',
@@ -1335,7 +1383,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'test.summary_count': {
                     'block_contents': 'The number of instances of the first name',
-                    'file_contents': docs_file,
+                    'file_contents': summary_count,
                     'name': 'summary_count',
                     'original_file_path': docs_path,
                     'package_name': 'test',
@@ -1345,7 +1393,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'test.summary_first_name': {
                     'block_contents': 'The first name being summarized',
-                    'file_contents': docs_file,
+                    'file_contents': summary_first_name,
                     'name': 'summary_first_name',
                     'original_file_path': docs_path,
                     'package_name': 'test',
@@ -1355,7 +1403,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                 },
                 'test.table_info': {
                     'block_contents': 'My table',
-                    'file_contents': docs_file,
+                    'file_contents': table_info,
                     'name': 'table_info',
                     'original_file_path': docs_path,
                     'package_name': 'test',
@@ -1368,7 +1416,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                         'A view of the summary of the ephemeral copy of the '
                         'seed data'
                     ),
-                    'file_contents': docs_file,
+                    'file_contents': view_summary,
                     'name': 'view_summary',
                     'original_file_path': docs_path,
                     'package_name': 'test',
@@ -1397,6 +1445,58 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'user_id': None,
             },
             'disabled': [],
+            'files': {
+                'macros/dummy_test.sql': {
+                    'checksum': self._checksum_file('macros/dummy_test.sql'),
+                    'nodes': ['macro.test.test_nothing'],
+                    'patches': [],
+                    'path': self._path_to('macros', 'dummy_test.sql'),
+                },
+                'ref_models/view_summary.sql': {
+                    'checksum': self._checksum_file('ref_models/view_summary.sql'),
+                    'nodes': ['model.test.view_summary'],
+                    'patches': [],
+                    'path': self._path_to('ref_models', 'view_summary.sql'),
+                },
+                'ref_models/ephemeral_summary.sql': {
+                    'checksum': self._checksum_file('ref_models/ephemeral_summary.sql'),
+                    'nodes': ['model.test.ephemeral_summary'],
+                    'patches': [],
+                    'path': self._path_to('ref_models', 'ephemeral_summary.sql'),
+                },
+                'ref_models/ephemeral_copy.sql': {
+                    'checksum': self._checksum_file('ref_models/ephemeral_copy.sql'),
+                    'nodes': ['model.test.ephemeral_copy'],
+                    'patches': [],
+                    'path': self._path_to('ref_models', 'ephemeral_copy.sql'),
+                },
+                'seed/seed.csv': {
+                    'checksum': {'name': 'none', 'checksum': ''},
+                    'nodes': ['seed.test.seed'],
+                    'patches': [],
+                    'path': self._path_to('seed', 'seed.csv'),
+                },
+                'ref_models/docs.md': {
+                    'checksum': self._checksum_file('ref_models/docs.md'),
+                    'nodes': [
+                        'test.ephemeral_summary',
+                        'test.summary_first_name',
+                        'test.summary_count',
+                        'test.view_summary',
+                        'test.source_info',
+                        'test.table_info'
+                    ],
+                    'patches': [],
+                    'path': self._path_to('ref_models', 'docs.md'),
+                },
+                'ref_models/schema.yml': {
+                    'checksum': self._checksum_file('ref_models/schema.yml'),
+                    'nodes': ['source.test.my_source.my_table'],
+                    'patches': ['ephemeral_summary', 'view_summary'],
+                    'path': self._path_to('ref_models', 'schema.yml'),
+                },
+
+            },
         }
 
     def expected_bigquery_complex_manifest(self):
@@ -1624,7 +1724,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'name': 'seed',
                     'root_path': OneOf(self.test_root_dir, self.initial_dir),
                     'resource_type': 'seed',
-                    'raw_sql': '-- csv --',
+                    'raw_sql': '',
                     'package_name': 'test',
                     'original_file_path': self.dir('seed/seed.csv'),
                     'refs': [],
@@ -1678,12 +1778,77 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'user_id': None,
             },
             'disabled': [],
+            'files': {
+                'macros/dummy_test.sql': {
+                    'checksum': self._checksum_file('macros/dummy_test.sql'),
+                    'path': self._path_to('macros', 'dummy_test.sql'),
+                    'nodes': ['macro.test.test_nothing'],
+                    'patches': [],
+                },
+                'bq_models/clustered.sql': {
+                    'checksum': self._checksum_file('bq_models/clustered.sql'),
+                    'path': self._path_to('bq_models', 'clustered.sql'),
+                    'nodes': ['model.test.clustered'],
+                    'patches': [],
+                },
+                'bq_models/multi_clustered.sql': {
+                    'checksum': self._checksum_file('bq_models/multi_clustered.sql'),
+                    'path': self._path_to('bq_models', 'multi_clustered.sql'),
+                    'nodes': ['model.test.multi_clustered'],
+                    'patches': [],
+                },
+                'bq_models/nested_table.sql': {
+                    'checksum': self._checksum_file('bq_models/nested_table.sql'),
+                    'path': self._path_to('bq_models', 'nested_table.sql'),
+                    'nodes': ['model.test.nested_table'],
+                    'patches': [],
+                },
+                'bq_models/nested_view.sql': {
+                    'checksum': self._checksum_file('bq_models/nested_view.sql'),
+                    'path': self._path_to('bq_models', 'nested_view.sql'),
+                    'nodes': ['model.test.nested_view'],
+                    'patches': [],
+                },
+                'seed/seed.csv': {
+                    'checksum': {'name': 'none', 'checksum': ''},
+                    'path': self._path_to('seed', 'seed.csv'),
+                    'nodes': ['seed.test.seed'],
+                    'patches': [],
+                },
+                'bq_models/schema.yml': {
+                    'checksum': self._checksum_file('bq_models/schema.yml'),
+                    'path': self._path_to('bq_models', 'schema.yml'),
+                    'nodes': [],
+                    'patches': ['nested_view', 'clustered', 'multi_clustered'],
+                },
+            },
+        }
+
+    def _checksum_file(self, path):
+        with open(self.dir(path), 'r') as fp:
+            hashed = hashlib.sha256(fp.read().encode('utf-8')).hexdigest()
+        return {
+            'name': 'sha256',
+            'checksum': hashed,
+        }
+
+    def _path_to(self, searched_path: str, relative_path: str):
+        if searched_path == '.':
+            absolute_path = os.path.join(self.test_root_dir, relative_path)
+        else:
+            absolute_path = os.path.join(self.test_root_dir, searched_path, relative_path)
+
+        return {
+            'searched_path': searched_path,
+            'relative_path': relative_path,
+            'absolute_path': absolute_path,
         }
 
     def expected_redshift_incremental_view_manifest(self):
         model_sql_path = self.dir('rs_models/model.sql')
         my_schema_name = self.unique_schema()
         config_vars = {'alternate_db': self.default_database}
+
         return {
             'nodes': {
                 'model.test.model': {
@@ -1752,7 +1917,7 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'name': 'seed',
                     'root_path': self.test_root_dir,
                     'resource_type': 'seed',
-                    'raw_sql': '-- csv --',
+                    'raw_sql': '',
                     'package_name': 'test',
                     'original_file_path': self.dir('seed/seed.csv'),
                     'refs': [],
@@ -1800,30 +1965,70 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'user_id': None,
             },
             'disabled': [],
+            'files': {
+                'macros/dummy_test.sql': {
+                    'checksum': self._checksum_file('macros/dummy_test.sql'),
+                    'path': self._path_to('macros', 'dummy_test.sql'),
+                    'nodes': ['macro.test.test_nothing'],
+                    'patches': [],
+                },
+                'rs_models/model.sql': {
+                    'checksum': self._checksum_file('rs_models/model.sql'),
+                    'path': self._path_to('rs_models', 'model.sql'),
+                    'nodes': ['model.test.model'],
+                    'patches': [],
+                },
+                'seed/seed.csv': {
+                    'checksum': {'name': 'none', 'checksum': ''},
+                    'path': self._path_to('seed', 'seed.csv'),
+                    'nodes': ['seed.test.seed'],
+                    'patches': [],
+                },
+                'rs_models/schema.yml': {
+                    'checksum': self._checksum_file('rs_models/schema.yml'),
+                    'path': self._path_to('rs_models', 'schema.yml'),
+                    'nodes': [],
+                    'patches': ['model'],
+                },
+            },
         }
+
+    def verify_files(self, got_files, expected_files):
+        # I'm sure this will be fun on windows. We just want to look at this
+        # project's files.
+        my_files = {
+            os.path.relpath(k, self.test_root_dir): v
+            for k, v in got_files.items()
+            if k.startswith(self.test_root_dir)
+        }
+
+        self.assertEqual(set(my_files), set(expected_files))
+        for k in my_files:
+            self.assertEqual(my_files[k], expected_files[k])
 
     def verify_manifest(self, expected_manifest):
         self.assertTrue(os.path.exists('./target/manifest.json'))
 
         manifest = _read_json('./target/manifest.json')
 
-        self.assertEqual(
-            set(manifest),
-            {'nodes', 'macros', 'parent_map', 'child_map', 'generated_at',
-             'docs', 'metadata', 'docs', 'disabled'}
-        )
+        manifest_keys = frozenset({
+            'nodes', 'macros', 'parent_map', 'child_map', 'generated_at',
+            'docs', 'metadata', 'docs', 'disabled', 'files'
+        })
 
-        self.verify_manifest_macros(manifest)
-        manifest_without_extras = {
-            k: v for k, v in manifest.items()
-            if k not in {'macros', 'generated_at'}
-        }
-        self.assertBetween(
-            manifest['generated_at'],
-            start=self.generate_start_time
-        )
-        self.assertEqual(manifest['disabled'], [])
-        self.assertEqual(manifest_without_extras, expected_manifest)
+        self.assertEqual(frozenset(manifest), manifest_keys)
+
+        for key in manifest_keys:
+            if key == 'macros':
+                self.verify_manifest_macros(manifest)
+            elif key == 'generated_at':
+                self.assertBetween(manifest['generated_at'],
+                                   start=self.generate_start_time)
+            elif key == 'files':
+                self.verify_files(manifest[key], expected_manifest[key])
+            else:
+                self.assertIn(key, expected_manifest)  # sanity check
+                self.assertEqual(manifest[key], expected_manifest[key])
 
     def _quote(self, value):
         quote_char = '`' if self.adapter_type == 'bigquery' else '"'
@@ -1931,12 +2136,10 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'fail': None,
                 'node': {
                     'alias': 'seed',
-                    'build_path': _normalize(
-                        'target/compiled/test/seed.csv'
-                    ),
+                    'build_path': None,
                     'columns': {},
                     'compiled': True,
-                    'compiled_sql': '-- csv --',
+                    'compiled_sql': '',
                     'config': {
                         'column_types': {},
                         'enabled': True,
@@ -1955,13 +2158,13 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'extra_ctes': [],
                     'extra_ctes_injected': True,
                     'fqn': ['test', 'seed'],
-                    'injected_sql': '-- csv --',
+                    'injected_sql': '',
                     'name': 'seed',
                     'original_file_path': self.dir('seed/seed.csv'),
                     'package_name': 'test',
                     'patch_path': None,
                     'path': 'seed.csv',
-                    'raw_sql': '-- csv --',
+                    'raw_sql': '',
                     'refs': [],
                     'resource_type': 'seed',
                     'root_path': OneOf(self.test_root_dir, self.initial_dir),
@@ -2337,12 +2540,10 @@ class TestDocsGenerate(DBTIntegrationTest):
                 'fail': None,
                 'node': {
                     'alias': 'seed',
-                    'build_path': _normalize(
-                        'target/compiled/test/seed.csv'
-                    ),
+                    'build_path': None,
                     'columns': {},
                     'compiled': True,
-                    'compiled_sql': '-- csv --',
+                    'compiled_sql': '',
                     'config': {
                         'column_types': {},
                         'enabled': True,
@@ -2361,13 +2562,13 @@ class TestDocsGenerate(DBTIntegrationTest):
                     'extra_ctes': [],
                     'extra_ctes_injected': True,
                     'fqn': ['test', 'seed'],
-                    'injected_sql': '-- csv --',
+                    'injected_sql': '',
                     'name': 'seed',
                     'original_file_path': self.dir('seed/seed.csv'),
                     'package_name': 'test',
                     'patch_path': None,
                     'path': 'seed.csv',
-                    'raw_sql': '-- csv --',
+                    'raw_sql': '',
                     'refs': [],
                     'resource_type': 'seed',
                     'root_path': OneOf(self.test_root_dir, self.initial_dir),

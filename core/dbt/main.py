@@ -92,8 +92,8 @@ def main(args=None):
         exit_code = e.code
 
     except BaseException as e:
-        logger.warn("Encountered an error:")
-        logger.warn(str(e))
+        logger.warning("Encountered an error:")
+        logger.warning(str(e))
 
         if logger_initialized():
             logger.debug(traceback.format_exc())
@@ -359,6 +359,7 @@ def _build_compile_subparser(subparsers, base_subparser):
         "analysis files. \nCompiled SQL files are written to the target/"
         "directory.")
     sub.set_defaults(cls=compile_task.CompileTask, which='compile')
+    sub.add_argument('--parse-only', action='store_true')
     return sub
 
 

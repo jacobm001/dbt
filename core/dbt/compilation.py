@@ -94,7 +94,7 @@ def recursively_prepend_ctes(model, manifest):
 
     model.prepend_ctes(prepended_ctes)
 
-    manifest.nodes[model.unique_id] = model
+    manifest.update_node(model)
 
     return (model, prepended_ctes, manifest)
 

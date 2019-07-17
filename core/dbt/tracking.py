@@ -51,7 +51,7 @@ class TimeoutEmitter(Emitter):
         if self.is_good_status_code(r.status_code):
             sp_logger.info(msg)
         else:
-            sp_logger.warn(msg)
+            sp_logger.warning(msg)
         return r
 
 

@@ -61,9 +61,9 @@ class NodeConfig(ExtensibleJsonSchemaMixin, Replaceable):
     tags: Union[List[str], str] = field(default_factory=list)
     _extra: Dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
-        if isinstance(self.tags, str):
-            self.tags = [self.tags]
+    # def __post_init__(self):
+    #     if isinstance(self.tags, str):
+    #         self.tags = [self.tags]
 
     @property
     def extra(self):
@@ -173,6 +173,7 @@ class ParsedNodeMandatory(
     HasUniqueID,
     HasFqn,
     HasRelationMetadata,
+    Replaceable
 ):
     alias: str
 
@@ -181,7 +182,7 @@ class ParsedNodeMandatory(
 class ParsedNodeDefaults(ParsedNodeMandatory):
     config: NodeConfig = field(default_factory=NodeConfig)
     tags: List[str] = field(default_factory=list)
-    refs: List[List[Any]] = field(default_factory=list)
+    refs: List[List[str]] = field(default_factory=list)
     sources: List[List[Any]] = field(default_factory=list)
     depends_on: DependsOn = field(default_factory=DependsOn)
     docrefs: List[Docref] = field(default_factory=list)
@@ -220,6 +221,11 @@ class ParsedRPCNode(ParsedNode):
 @dataclass
 class ParsedSeedNode(ParsedNode):
     resource_type: SeedType
+
+    @property
+    def empty(self):
+        """ Seeds are never empty"""
+        return False
 
 
 @dataclass
@@ -340,8 +346,8 @@ class ParsedSnapshotNode(ParsedNode):
     ]
 
     @classmethod
-    def json_schema(cls):
-        schema = super().json_schema()
+    def json_schema(cls, embeddable=False):
+        schema = super().json_schema(embeddable)
 
         # mess with config
         configs = [
@@ -349,7 +355,11 @@ class ParsedSnapshotNode(ParsedNode):
             (str(TimestampStrategy.Timestamp), TimestampSnapshotConfig),
         ]
 
-        schema['properties']['config'] = _create_if_else_chain(
+        if embeddable:
+            dest = schema[cls.__name__]['properties']
+        else:
+            dest = schema['properties']
+        dest['config'] = _create_if_else_chain(
             'strategy', configs, GenericSnapshotConfig
         )
         return schema
@@ -373,12 +383,13 @@ class MacroDependsOn(JsonSchemaMixin, Replaceable):
 
 
 @dataclass
-class ParsedMacro(UnparsedMacro):
+class ParsedMacro(UnparsedMacro, HasUniqueID):
     name: str
     resource_type: MacroType
-    unique_id: str
-    tags: List[str]
-    depends_on: MacroDependsOn
+    # TODO: can macros even have tags?
+    tags: List[str] = field(default_factory=list)
+    # TODO: is this ever populated?
+    depends_on: MacroDependsOn = field(default_factory=MacroDependsOn)
 
     def local_vars(self):
         return {}
@@ -392,9 +403,8 @@ class ParsedMacro(UnparsedMacro):
 
 
 @dataclass
-class ParsedDocumentation(UnparsedDocumentationFile):
+class ParsedDocumentation(UnparsedDocumentationFile, HasUniqueID):
     name: str
-    unique_id: str
     block_contents: str
 
 

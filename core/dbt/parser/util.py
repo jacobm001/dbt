@@ -157,6 +157,12 @@ class ParserUtils:
         source.description = table_description
         source.source_description = source_description
 
+        for column in source.columns.values():
+            column_desc = column.description
+            column_desc = dbt.clients.jinja.get_rendered(column_desc, context)
+            column.description = column_desc
+
+
     @classmethod
     def process_docs(cls, manifest, current_project):
         for node in manifest.nodes.values():
@@ -200,11 +206,16 @@ class ParserUtils:
             target_model_id = target_model.unique_id
 
             node.depends_on.nodes.append(target_model_id)
-            manifest.nodes[node.unique_id] = node
+            # TODO: I think this is extraneous, node should already be the same
+            # as manifest.nodes[node.unique_id] (we're mutating node here, not
+            # making a new one)
+            manifest.update_node(node)
 
     @classmethod
     def process_refs(cls, manifest, current_project):
-        for node in manifest.nodes.values():
+        # process_refs_for_node will mutate this
+        all_nodes = list(manifest.nodes.values())
+        for node in all_nodes:
             cls.process_refs_for_node(manifest, current_project, node)
         return manifest
 
@@ -229,11 +240,12 @@ class ParserUtils:
                 continue
             target_source_id = target_source.unique_id
             node.depends_on.nodes.append(target_source_id)
-            manifest.nodes[node.unique_id] = node
+            manifest.update_node(node)
 
     @classmethod
     def process_sources(cls, manifest, current_project):
-        for node in manifest.nodes.values():
+        all_nodes = list(manifest.nodes.values())
+        for node in all_nodes:
             cls.process_sources_for_node(manifest, current_project, node)
         return manifest
 
@@ -247,13 +259,7 @@ class ParserUtils:
         # it's ok for macros to silently override a local project macro name
         manifest.macros.update(macros)
 
-        if node.unique_id in manifest.nodes:
-            # this should be _impossible_ due to the fact that rpc calls get
-            # a unique ID that starts with 'rpc'!
-            raise dbt.exceptions.raise_duplicate_resource_name(
-                manifest.nodes[node.unique_id], node
-            )
-        manifest.nodes[node.unique_id] = node
+        manifest.add_nodes({node.unique_id: node})
         cls.process_sources_for_node(manifest, current_project, node)
         cls.process_refs_for_node(manifest, current_project, node)
         cls.process_docs_for_node(manifest, current_project, node)

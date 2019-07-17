@@ -1,156 +1,162 @@
+import json
 import os
 import itertools
+from datetime import datetime
+from typing import Dict
+
+from hologram import ValidationError
 
 from dbt.include.global_project import PACKAGES
 import dbt.exceptions
 import dbt.flags
 
 from dbt.node_types import NodeType
-from dbt.contracts.graph.manifest import Manifest
+from dbt.contracts.graph.manifest import Manifest, FilePath
 
-from dbt.parser import MacroParser, ModelParser, SeedParser, AnalysisParser, \
-    DocumentationParser, DataTestParser, HookParser, SchemaParser, \
-    ParserUtils, SnapshotParser
+from dbt.parser import Parser
+from dbt.parser import AnalysisParser
+from dbt.parser import DataTestParser
+from dbt.parser import DocumentationParser
+from dbt.parser import HookParser
+from dbt.parser import MacroParser
+from dbt.parser import ModelParser
+from dbt.parser import ParseResult
+from dbt.parser import SchemaParser
+from dbt.parser import SeedParser
+from dbt.parser import SnapshotParser
+from dbt.parser import ParserUtils
 
-from datetime import datetime
+from dbt.parser.search import FileBlock
+
+
+PARTIAL_PARSE_FILE_NAME = 'partial_parse.json'
+
+
+_parser_types = [
+    ModelParser,
+    SnapshotParser,
+    AnalysisParser,
+    DataTestParser,
+    HookParser,
+    SeedParser,
+    DocumentationParser,
+    SchemaParser,
+]
 
 
 class GraphLoader:
     def __init__(self, root_project, all_projects):
         self.root_project = root_project
         self.all_projects = all_projects
-        self.nodes = {}
-        self.docs = {}
-        self.macros = {}
-        self.tests = {}
-        self.patches = {}
-        self.disabled = []
-        self.macro_manifest = None
 
-    def _load_sql_nodes(self, parser_type, resource_type, relative_dirs_attr,
-                        **kwargs):
-        parser = parser_type(self.root_project, self.all_projects,
-                             self.macro_manifest)
+        self.results = ParseResult()
+        self._loaded_file_cache: Dict[str, FileBlock] = {}
 
-        for project_name, project in self.all_projects.items():
-            parse_results = parser.load_and_parse(
-                package_name=project_name,
-                root_dir=project.project_root,
-                relative_dirs=getattr(project, relative_dirs_attr),
-                resource_type=resource_type,
-                **kwargs
-            )
-            self.nodes.update(parse_results.parsed)
-            self.disabled.extend(parse_results.disabled)
+    def _load_macros(self, results, internal_manifest=None):
+        # TODO: go back to skipping the internal manifest during macro parsing
+        for project in self.all_projects.values():
+            parser = MacroParser(results, project)
+            parser.search()
+            for path in parser.searched:
+                parser.parse_file_from_path(path)
 
-    def _load_macros(self, internal_manifest=None):
-        # skip any projects in the internal manifest
-        all_projects = self.all_projects.copy()
-        if internal_manifest is not None:
-            for name in internal_project_names():
-                all_projects.pop(name, None)
-            self.macros.update(internal_manifest.macros)
+    def _get_cached(self, block, old_results) -> bool:
+        # TODO: handle multiple parsers w/ same files, by
+        # tracking parser type vs node type? Or tracking actual
+        # parser type during parsing?
+        if old_results.has_file(block.file):
+            return self.results.sanitized_update(block.file, old_results)
+        return False
 
-        # give the macroparser all projects but then only load what we haven't
-        # loaded already
-        parser = MacroParser(self.root_project, self.all_projects)
-        for project_name, project in all_projects.items():
-            self.macros.update(parser.load_and_parse(
-                package_name=project_name,
-                root_dir=project.project_root,
-                relative_dirs=project.macro_paths,
-                resource_type=NodeType.Macro,
-            ))
+    def _get_file(self, path: FilePath, parser: Parser) -> FileBlock:
+        if path.search_key in self._loaded_file_cache:
+            block = self._loaded_file_cache[path.search_key]
+        else:
+            block = FileBlock(file=parser.load_file(path))
+            self._loaded_file_cache[path.search_key] = block
+        return block
 
-    def _load_seeds(self):
-        parser = SeedParser(self.root_project, self.all_projects,
-                            self.macro_manifest)
-        for project_name, project in self.all_projects.items():
-            self.nodes.update(parser.load_and_parse(
-                package_name=project_name,
-                root_dir=project.project_root,
-                relative_dirs=project.data_paths,
-            ))
+    def parse_project(self, project, macro_manifest, old_results):
+        parsers = []
+        for cls in _parser_types:
+            parser = cls(self.results, project, self.root_project,
+                         macro_manifest)
+            parsers.append(parser)
 
-    def _load_nodes(self):
-        self._load_sql_nodes(ModelParser, NodeType.Model, 'source_paths')
-        self._load_sql_nodes(SnapshotParser, NodeType.Snapshot,
-                             'snapshot_paths')
-        self._load_sql_nodes(AnalysisParser, NodeType.Analysis,
-                             'analysis_paths')
-        self._load_sql_nodes(DataTestParser, NodeType.Test, 'test_paths',
-                             tags=['data'])
+        # per-project cache.
+        self._loaded_file_cache: Dict[str, FileBlock] = {}
 
-        hook_parser = HookParser(self.root_project, self.all_projects,
-                                 self.macro_manifest)
-        self.nodes.update(hook_parser.load_and_parse())
-
-        self._load_seeds()
-
-    def _load_docs(self):
-        parser = DocumentationParser(self.root_project, self.all_projects)
-        for project_name, project in self.all_projects.items():
-            self.docs.update(parser.load_and_parse(
-                package_name=project_name,
-                root_dir=project.project_root,
-                relative_dirs=project.docs_paths
-            ))
-
-    def _load_schema_tests(self):
-        parser = SchemaParser(self.root_project, self.all_projects,
-                              self.macro_manifest)
-        for project_name, project in self.all_projects.items():
-            tests, patches, sources = parser.load_and_parse(
-                package_name=project_name,
-                root_dir=project.project_root,
-                relative_dirs=project.source_paths
-            )
-
-            for unique_id, test in tests.items():
-                if unique_id in self.tests:
-                    dbt.exceptions.raise_duplicate_resource_name(
-                        test, self.tests[unique_id],
-                    )
-                self.tests[unique_id] = test
-
-            for unique_id, source in sources.items():
-                if unique_id in self.nodes:
-                    dbt.exceptions.raise_duplicate_resource_name(
-                        source, self.nodes[unique_id],
-                    )
-                self.nodes[unique_id] = source
-
-            for name, patch in patches.items():
-                if name in self.patches:
-                    dbt.exceptions.raise_duplicate_patch_name(
-                        name, patch, self.patches[name]
-                    )
-                self.patches[name] = patch
+        for parser in parsers:
+            for path in parser.search():
+                block = self._get_file(path, parser)
+                if not self._get_cached(block, old_results):
+                    parser.parse_file(block)
 
     def load(self, internal_manifest=None):
-        self._load_macros(internal_manifest=internal_manifest)
+        old_results = self.read_parse_results()
+        self._load_macros(self.results, internal_manifest=internal_manifest)
         # make a manifest with just the macros to get the context
-        self.macro_manifest = Manifest(macros=self.macros, nodes={}, docs={},
-                                       generated_at=datetime.utcnow(),
-                                       disabled=[])
-        self._load_nodes()
-        self._load_docs()
-        self._load_schema_tests()
+        macro_manifest = Manifest.from_macros(macros=self.results.macros)
+
+        for project in self.all_projects.values():
+            # parse a single project
+            self.parse_project(project, macro_manifest, old_results)
+
+    def write_parse_results(self):
+        path = os.path.join(self.root_project.target_path,
+                            # 'partial_parse.pickle',)
+                            PARTIAL_PARSE_FILE_NAME
+                            )
+        self.results.write(path)
+        # with open(path, 'wb') as fp:
+        #     import pickle
+        #     pickle.dump(self.results, fp)
+
+    def read_parse_results(self) -> ParseResult:
+        # TODO: given a manifest written below, build this.
+        # the hard part is handling nodes being enabled/disabled and
+        # "infecting" child tests vs being set elsewhere.
+        # but then we wouldn't have to write the same data twice!
+
+        path = os.path.join(self.root_project.target_path,
+                            # 'partial_parse.pickle',
+                            PARTIAL_PARSE_FILE_NAME
+                            )
+        if not os.path.exists(path):
+            return ParseResult()
+
+        # with open(path, 'rb') as fp:
+        #     import pickle
+        #     return pickle.load(fp)
+
+        with open(path, 'rb') as fp:
+            try:
+                data = json.load(fp)
+            except ValueError:
+                return ParseResult()
+        try:
+            return ParseResult.from_dict(data, validate=False)
+        except ValidationError:
+            return ParseResult()
 
     def create_manifest(self):
+        nodes = {}
+        nodes.update(self.results.nodes)
+        nodes.update(self.results.sources)
         manifest = Manifest(
-            nodes=self.nodes,
-            macros=self.macros,
-            docs=self.docs,
+            nodes=nodes,
+            macros=self.results.macros,
+            docs=self.results.docs,
             generated_at=datetime.utcnow(),
             config=self.root_project,
-            disabled=self.disabled
+            disabled=self.results.disabled,
+            files=self.results.files,
         )
-        manifest.add_nodes(self.tests)
-        manifest.patch_nodes(self.patches)
+        manifest.patch_nodes(self.results.patches)
         manifest = ParserUtils.process_sources(manifest, self.root_project)
-        manifest = ParserUtils.process_refs(manifest,
-                                            self.root_project.project_name)
+        manifest = ParserUtils.process_refs(
+            manifest, self.root_project.project_name
+        )
         manifest = ParserUtils.process_docs(manifest, self.root_project)
         return manifest
 
@@ -158,6 +164,7 @@ class GraphLoader:
     def _load_from_projects(cls, root_config, projects, internal_manifest):
         loader = cls(root_config, projects)
         loader.load(internal_manifest=internal_manifest)
+        loader.write_parse_results()
         return loader.create_manifest()
 
     @classmethod
