@@ -87,6 +87,8 @@ class DocumentationParser(Parser[ParsedDocumentation]):
             allowed_blocks={'docs'},
             source_tag_factory=FullBlock,
         )
+        # mark the file as seen, even if there are no macros in it
+        self.results.get_file(file_block.file)
         for block in searcher:
             for parsed in self.parse_block(block):
                 self.results.add_doc(file_block.file, parsed)

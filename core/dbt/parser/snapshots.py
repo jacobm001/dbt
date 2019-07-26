@@ -62,5 +62,8 @@ class SnapshotParser(
             allowed_blocks={'snapshot'},
             source_tag_factory=BlockContents,
         )
+        # in case there are no snapshots declared, we still want to mark this
+        # file as seen.
+        self.results.get_file(file_block.file)
         for block in blocks:
             self.parse_node(block)

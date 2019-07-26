@@ -29,4 +29,4 @@ class SeedParser(SimpleSQLParser[ParsedSeedNode]):
         """Seeds don't need to do any rendering."""
 
     def load_file(self, match: FilePath) -> SourceFile:
-        return SourceFile.empty(match)
+        return SourceFile.seed(match)

@@ -47,6 +47,10 @@ class FileHash(JsonSchemaMixin):
     def empty(cls):
         return FileHash(name='none', checksum='')
 
+    @classmethod
+    def path(cls, path: str):
+        return FileHash(name='path', checksum=path)
+
     def __eq__(self, other):
         if not isinstance(other, type(self)):
             return False
@@ -150,6 +154,13 @@ class SourceFile(JsonSchemaMixin):
     @classmethod
     def empty(cls, path: FilePath) -> 'SourceFile':
         self = cls(path=path, checksum=FileHash.empty())
+        self.contents = ''
+        return self
+
+    @classmethod
+    def seed(cls, path: FilePath) -> 'SourceFile':
+        """Seeds always parse the same regardless of their content."""
+        self = cls(path=path, checksum=FileHash.path(path.absolute_path))
         self.contents = ''
         return self
 
