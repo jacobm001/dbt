@@ -57,7 +57,11 @@ class SQLConnectionManager(BaseConnectionManager):
             pre = time.time()
 
             cursor = connection.handle.cursor()
-            cursor.execute(sql, bindings)
+
+            if bindings is not None:
+                cursor.execute(sql, bindings)
+            else:
+                cursor.execute(sql)
 
             logger.debug("SQL status: %s in %0.2f seconds",
                          self.get_status(cursor), (time.time() - pre))
